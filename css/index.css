@@ -3,20 +3,48 @@ body {
     text-align: center;
     background-color: #f4f4f4;
     padding: 50px;
+    position: relative;
 }
 
 .welcome-container {
     background: white;
-    padding: 20px;
+    padding: 30px;
     border-radius: 10px;
     box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
     display: inline-block;
+    animation: fadeIn 1s ease-in-out;
 }
 
 h1 {
     color: #333;
+    font-size: 2.5em;
+    text-transform: uppercase;
+    letter-spacing: 2px;
 }
 
 p {
     color: #666;
+    font-size: 1.2em;
+    font-weight: bold;
+    color: #d9534f;
+    font-size: 1.3em;
+    text-transform: uppercase;
+    margin-top: 10px;
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
+
+@keyframes blink {
+    0%, 100% { background: #ffcc00; }
+    50% { background: #ff6600; }
 }
