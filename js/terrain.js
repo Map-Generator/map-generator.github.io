@@ -8,6 +8,8 @@ class MapObject {
         this.colors = [];
         this.cities = [];
         this.villages = [];
+        this.cityNames = [];
+        this.villageNames = [];
         this.panX = 0;
         this.panY = 0;
         this.zoomLevel = 1;
@@ -20,6 +22,11 @@ class MapObject {
             water: true
         };
         
+        // Name generation parts
+        this.cityPrefixes = ["Elder", "Storm", "Iron", "High", "Dawn", "Dusk", "Moon", "Sun", "Star", "Dragon", "Crystal", "Silver", "Golden", "Shadow", "Frost"];
+        this.citySuffixes = ["haven", "spire", "keep", "guard", "hold", "gate", "fall", "rise", "peak", "crown", "realm", "forge", "heart", "watch", "ward"];
+        this.villageSuffixes = ["brook", "wood", "vale", "dale", "field", "stead", "ton", "ford", "cross", "bridge", "mill", "shore", "haven", "rest", "home"];
+        
         // Create off-screen canvas for caching
         this.mapCache = document.createElement('canvas');
         this.mapCache.width = width;
@@ -28,6 +35,37 @@ class MapObject {
         
         // Generate initial map data
         this.generateNewPoints();
+    }
+
+    generateRandomName(prefixes, suffixes, usedNames = []) {
+        let name;
+        let attempts = 0;
+        const maxAttempts = 50;
+
+        do {
+            const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+            const suffix = suffixes[Math.floor(Math.random() * suffixes.length)];
+            name = prefix + suffix;
+            attempts++;
+        } while (usedNames.includes(name) && attempts < maxAttempts);
+
+        return name;
+    }
+
+    generateSettlementNames() {
+        // Generate city names
+        this.cityNames = [];
+        for (let i = 0; i < this.cities.length; i++) {
+            const name = this.generateRandomName(this.cityPrefixes, this.citySuffixes, this.cityNames);
+            this.cityNames.push(name);
+        }
+
+        // Generate village names
+        this.villageNames = [];
+        for (let i = 0; i < this.villages.length; i++) {
+            const name = this.generateRandomName(this.villagePrefixes, this.villageSuffixes, this.villageNames);
+            this.villageNames.push(name);
+        }
     }
 
     generateNewPoints() {
@@ -70,36 +108,181 @@ class MapObject {
         });
 
         // Function to check if a point is on valid terrain (grass or dry plains)
-        const isValidSettlementLocation = (x, y) => {
+        const isValidSettlementLocation = (x, y, isCity = false) => {
             if (x < 0 || x >= this.width || y < 0 || y >= this.height) return false;
-            const closestIndex = d3.Delaunay.from(this.points).find(x, y);
-            const terrainColor = this.colors[closestIndex];
-            return terrainColor === "#4CAF50" || terrainColor === "#8B4513"; // Grass or dry plains
+            const delaunay = d3.Delaunay.from(this.points);
+            
+            // For cities, check a larger surrounding area
+            const checkRadius = isCity ? 40 : 20;
+            let validTiles = 0;
+            let totalTiles = 0;
+            let grassTiles = 0;
+            let dryPlainsTiles = 0;
+            
+            // Check surrounding area in a grid pattern
+            for (let dx = -checkRadius; dx <= checkRadius; dx += 5) {
+                for (let dy = -checkRadius; dy <= checkRadius; dy += 5) {
+                    const checkX = x + dx;
+                    const checkY = y + dy;
+                    const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
+                    
+                    // Only count tiles within a circular area
+                    if (distanceFromCenter <= checkRadius && 
+                        checkX >= 0 && checkX < this.width && 
+                        checkY >= 0 && checkY < this.height) {
+                        totalTiles++;
+                        const closestIndex = delaunay.find(checkX, checkY);
+                        const terrainColor = this.colors[closestIndex];
+                        
+                        if (terrainColor === "#4CAF50") {
+                            grassTiles++;
+                            validTiles++;
+                        } else if (terrainColor === "#8B4513") {
+                            dryPlainsTiles++;
+                            validTiles++;
+                        }
+                    }
+                }
+            }
+            
+            if (isCity) {
+                // Cities need to be in mostly grassland areas (70% grass)
+                return (grassTiles / totalTiles) >= 0.7 && totalTiles > 0;
+            } else {
+                // Villages can be in mixed terrain (50% valid terrain)
+                return (validTiles / totalTiles) >= 0.5 && totalTiles > 0;
+            }
         };
 
-        // Generate very few cities on valid terrain
+        // Function to find centers of large grassland areas
+        const findGrasslandCenters = () => {
+            const gridSize = 10;
+            const grasslandScores = new Array(Math.ceil(this.width/gridSize))
+                .fill(0)
+                .map(() => new Array(Math.ceil(this.height/gridSize)).fill(0));
+            
+            // Calculate grassland density for each grid cell
+            const delaunay = d3.Delaunay.from(this.points);
+            for(let x = 0; x < this.width; x += gridSize) {
+                for(let y = 0; y < this.height; y += gridSize) {
+                    let grassCount = 0;
+                    const checkRadius = 30;
+                    
+                    // Check surrounding area
+                    for(let dx = -checkRadius; dx <= checkRadius; dx += 5) {
+                        for(let dy = -checkRadius; dy <= checkRadius; dy += 5) {
+                            const checkX = x + dx;
+                            const checkY = y + dy;
+                            const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
+                            
+                            if(distanceFromCenter <= checkRadius && 
+                               checkX >= 0 && checkX < this.width && 
+                               checkY >= 0 && checkY < this.height) {
+                                const closestIndex = delaunay.find(checkX, checkY);
+                                if(this.colors[closestIndex] === "#4CAF50") {
+                                    grassCount++;
+                                }
+                            }
+                        }
+                    }
+                    
+                    grasslandScores[Math.floor(x/gridSize)][Math.floor(y/gridSize)] = grassCount;
+                }
+            }
+            
+            // Find local maxima in grassland scores
+            const centers = [];
+            const minScore = 100;
+            
+            for(let x = 1; x < grasslandScores.length - 1; x++) {
+                for(let y = 1; y < grasslandScores[x].length - 1; y++) {
+                    const score = grasslandScores[x][y];
+                    if(score < minScore) continue;
+                    
+                    // Check if it's a local maximum
+                    let isMax = true;
+                    for(let dx = -1; dx <= 1; dx++) {
+                        for(let dy = -1; dy <= 1; dy++) {
+                            if(dx === 0 && dy === 0) continue;
+                            if(grasslandScores[x + dx][y + dy] > score) {
+                                isMax = false;
+                                break;
+                            }
+                        }
+                        if(!isMax) break;
+                    }
+                    
+                    if(isMax) {
+                        centers.push({
+                            x: (x + 0.5) * gridSize,
+                            y: (y + 0.5) * gridSize,
+                            score: score
+                        });
+                    }
+                }
+            }
+            
+            // Sort centers by score and return the best ones
+            return centers.sort((a, b) => b.score - a.score);
+        };
+
+        // Generate cities in the centers of grassland areas
+        const grasslandCenters = findGrasslandCenters();
         this.cities = [];
+        
+        // Randomly decide how many cities to generate (1-3)
+        const numCities = Math.floor(Math.random() * 3) + 1;
+        
+        // Take the top centers that are far enough apart
+        const minCityDistance = 100;
+        for(const center of grasslandCenters) {
+            const isFarFromOtherCities = this.cities.every(([cx, cy]) => {
+                const dx = center.x - cx;
+                const dy = center.y - cy;
+                return Math.sqrt(dx * dx + dy * dy) >= minCityDistance;
+            });
+            
+            if(isFarFromOtherCities) {
+                this.cities.push([center.x, center.y]);
+                if(this.cities.length >= numCities) break;
+            }
+        }
+
+        // Generate villages on valid terrain
+        this.villages = [];
         let attempts = 0;
-        while (this.cities.length < 3 && attempts < 1000) { // Reduced from 5 to 3 cities
+        // Randomly decide how many villages to generate (2-4)
+        const numVillages = Math.floor(Math.random() * 3) + 2;
+        
+        while (this.villages.length < numVillages && attempts < 1000) {
             const x = Math.random() * this.width;
             const y = Math.random() * this.height;
-            if (isValidSettlementLocation(x, y)) {
-                this.cities.push([x, y]);
+            if (isValidSettlementLocation(x, y, false)) {
+                // Check if the location is far enough from cities
+                const minDistanceToCity = 60;
+                const minDistanceToVillage = 40;
+                
+                const isFarFromCities = this.cities.every(([cx, cy]) => {
+                    const dx = x - cx;
+                    const dy = y - cy;
+                    return Math.sqrt(dx * dx + dy * dy) >= minDistanceToCity;
+                });
+                
+                const isFarFromVillages = this.villages.every(([vx, vy]) => {
+                    const dx = x - vx;
+                    const dy = y - vy;
+                    return Math.sqrt(dx * dx + dy * dy) >= minDistanceToVillage;
+                });
+                
+                if (isFarFromCities && isFarFromVillages) {
+                    this.villages.push([x, y]);
+                }
             }
             attempts++;
         }
 
-        // Generate fewer villages on valid terrain
-        this.villages = [];
-        attempts = 0;
-        while (this.villages.length < 4 && attempts < 1000) { // Reduced from 8 to 4 villages
-            const x = Math.random() * this.width;
-            const y = Math.random() * this.height;
-            if (isValidSettlementLocation(x, y)) {
-                this.villages.push([x, y]);
-            }
-            attempts++;
-        }
+        // Generate names for all settlements
+        this.generateSettlementNames();
 
         this.generateMapCache();
     }
@@ -119,6 +302,9 @@ class MapObject {
                 this.renderSmoothToCache();
                 break;
         }
+        
+        // Draw settlements into the cache
+        this.renderCitiesAndVillagesToCache();
     }
 
     renderVoronoiToCache() {
@@ -356,7 +542,6 @@ class MapObject {
         }
 
         this.renderCitiesAndVillages();
-        this.renderPaths();
         this.ctx.restore();
     }
 
@@ -397,23 +582,22 @@ class MapObject {
         }
 
         this.renderCitiesAndVillages();
-        this.renderPaths();
         this.ctx.restore();
     }
 
     renderCitiesAndVillages() {
-        const gridSize = 2; // Match the pixel size used in renderPixelToCache
+        const gridSize = 2;
 
         // Draw settlement areas
         this.cities.forEach(([x, y], index) => {
             if (x >= 0 && x <= this.width && y >= 0 && y <= this.height) {
-                // Draw city area (larger settlement)
-                const citySize = 16; // 8x8 pixels
+                // Draw city area (smaller settlement)
+                const citySize = 12; // Reduced from 16 to 12
                 const startX = Math.floor(x - citySize/2);
                 const startY = Math.floor(y - citySize/2);
 
                 // Draw darker border
-                this.ctx.fillStyle = "#8B0000"; // Dark red
+                this.ctx.fillStyle = "#8B0000";
                 for(let px = startX; px < startX + citySize; px += gridSize) {
                     for(let py = startY; py < startY + citySize; py += gridSize) {
                         if(px === startX || px >= startX + citySize - gridSize || 
@@ -424,7 +608,7 @@ class MapObject {
                 }
 
                 // Draw inner area
-                this.ctx.fillStyle = "#CD5C5C"; // Indian Red
+                this.ctx.fillStyle = "#CD5C5C";
                 for(let px = startX + gridSize; px < startX + citySize - gridSize; px += gridSize) {
                     for(let py = startY + gridSize; py < startY + citySize - gridSize; py += gridSize) {
                         this.ctx.fillRect(px, py, gridSize, gridSize);
@@ -433,7 +617,7 @@ class MapObject {
 
                 // Draw label with background
                 this.ctx.font = "bold 12px Arial";
-                const text = "City " + (index + 1);
+                const text = this.cityNames[index];
                 const textWidth = this.ctx.measureText(text).width;
                 
                 this.ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
@@ -449,12 +633,12 @@ class MapObject {
         this.villages.forEach(([x, y], index) => {
             if (x >= 0 && x <= this.width && y >= 0 && y <= this.height) {
                 // Draw village area (smaller settlement)
-                const villageSize = 10; // 5x5 pixels
+                const villageSize = 10;
                 const startX = Math.floor(x - villageSize/2);
                 const startY = Math.floor(y - villageSize/2);
 
                 // Draw darker border
-                this.ctx.fillStyle = "#00008B"; // Dark blue
+                this.ctx.fillStyle = "#00008B";
                 for(let px = startX; px < startX + villageSize; px += gridSize) {
                     for(let py = startY; py < startY + villageSize; py += gridSize) {
                         if(px === startX || px >= startX + villageSize - gridSize || 
@@ -465,7 +649,7 @@ class MapObject {
                 }
 
                 // Draw inner area
-                this.ctx.fillStyle = "#4169E1"; // Royal Blue
+                this.ctx.fillStyle = "#4169E1";
                 for(let px = startX + gridSize; px < startX + villageSize - gridSize; px += gridSize) {
                     for(let py = startY + gridSize; py < startY + villageSize - gridSize; py += gridSize) {
                         this.ctx.fillRect(px, py, gridSize, gridSize);
@@ -474,7 +658,7 @@ class MapObject {
 
                 // Draw label with background
                 this.ctx.font = "bold 12px Arial";
-                const text = "Village " + (index + 1);
+                const text = this.villageNames[index];
                 const textWidth = this.ctx.measureText(text).width;
                 
                 this.ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
@@ -488,55 +672,85 @@ class MapObject {
         });
     }
 
-    renderPaths() {
-        // Draw paths between settlements
-        this.ctx.strokeStyle = "#8B4513";
-        this.ctx.lineWidth = 2;
+    renderCitiesAndVillagesToCache() {
+        const ctx = this.mapCacheCtx;
         const gridSize = 2;
 
-        // Function to draw pixelated path
-        const drawPixelatedPath = (x1, y1, x2, y2) => {
-            const dx = Math.abs(x2 - x1);
-            const dy = Math.abs(y2 - y1);
-            const sx = x1 < x2 ? gridSize : -gridSize;
-            const sy = y1 < y2 ? gridSize : -gridSize;
-            let err = dx - dy;
-            
-            let x = x1;
-            let y = y1;
+        // Draw cities
+        this.cities.forEach(([x, y], index) => {
+            if (x >= 0 && x <= this.width && y >= 0 && y <= this.height) {
+                const citySize = 12;
+                const startX = Math.floor(x - citySize/2);
+                const startY = Math.floor(y - citySize/2);
 
-            while (true) {
-                this.ctx.fillRect(x, y, gridSize, gridSize);
-                
-                if (Math.abs(x - x2) < gridSize && Math.abs(y - y2) < gridSize) break;
-                
-                const e2 = 2 * err;
-                if (e2 > -dy) {
-                    err -= dy;
-                    x += sx;
+                ctx.fillStyle = "#8B0000";
+                for(let px = startX; px < startX + citySize; px += gridSize) {
+                    for(let py = startY; py < startY + citySize; py += gridSize) {
+                        if(px === startX || px >= startX + citySize - gridSize || 
+                           py === startY || py >= startY + citySize - gridSize) {
+                            ctx.fillRect(px, py, gridSize, gridSize);
+                        }
+                    }
                 }
-                if (e2 < dx) {
-                    err += dx;
-                    y += sy;
+
+                ctx.fillStyle = "#CD5C5C";
+                for(let px = startX + gridSize; px < startX + citySize - gridSize; px += gridSize) {
+                    for(let py = startY + gridSize; py < startY + citySize - gridSize; py += gridSize) {
+                        ctx.fillRect(px, py, gridSize, gridSize);
+                    }
                 }
+
+                ctx.font = "bold 12px Arial";
+                const text = this.cityNames[index];
+                const textWidth = ctx.measureText(text).width;
+                
+                ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+                ctx.fillRect(x - textWidth/2 - 4, y - 24, textWidth + 8, 16);
+                
+                ctx.fillStyle = "#8B0000";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText(text, x, y - 16);
             }
-        };
+        });
 
-        // Draw paths between cities
-        this.ctx.fillStyle = "#8B4513";
-        for (let i = 0; i < this.cities.length - 1; i++) {
-            const [x1, y1] = this.cities[i];
-            const [x2, y2] = this.cities[i + 1];
-            drawPixelatedPath(x1, y1, x2, y2);
-        }
+        // Draw villages
+        this.villages.forEach(([x, y], index) => {
+            if (x >= 0 && x <= this.width && y >= 0 && y <= this.height) {
+                const villageSize = 10;
+                const startX = Math.floor(x - villageSize/2);
+                const startY = Math.floor(y - villageSize/2);
 
-        // Draw paths between villages (slightly thinner)
-        this.ctx.fillStyle = "#A0522D";
-        for (let i = 0; i < this.villages.length - 1; i++) {
-            const [x1, y1] = this.villages[i];
-            const [x2, y2] = this.villages[i + 1];
-            drawPixelatedPath(x1, y1, x2, y2);
-        }
+                ctx.fillStyle = "#00008B";
+                for(let px = startX; px < startX + villageSize; px += gridSize) {
+                    for(let py = startY; py < startY + villageSize; py += gridSize) {
+                        if(px === startX || px >= startX + villageSize - gridSize || 
+                           py === startY || py >= startY + villageSize - gridSize) {
+                            ctx.fillRect(px, py, gridSize, gridSize);
+                        }
+                    }
+                }
+
+                ctx.fillStyle = "#4169E1";
+                for(let px = startX + gridSize; px < startX + villageSize - gridSize; px += gridSize) {
+                    for(let py = startY + gridSize; py < startY + villageSize - gridSize; py += gridSize) {
+                        ctx.fillRect(px, py, gridSize, gridSize);
+                    }
+                }
+
+                ctx.font = "bold 12px Arial";
+                const text = this.villageNames[index];
+                const textWidth = ctx.measureText(text).width;
+                
+                ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+                ctx.fillRect(x - textWidth/2 - 4, y - 24, textWidth + 8, 16);
+                
+                ctx.fillStyle = "#00008B";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText(text, x, y - 16);
+            }
+        });
     }
 
     render() {
@@ -553,15 +767,12 @@ class MapObject {
         this.ctx.fillRect(offsetX - viewportWidth, offsetY - viewportHeight, 
                          viewportWidth * 3, viewportHeight * 3);
         
-        // Draw the cached map
+        // Draw the cached map with everything included
         this.ctx.translate(this.panX, this.panY);
         this.ctx.scale(this.zoomLevel, this.zoomLevel);
         this.ctx.imageSmoothingEnabled = false;
         this.ctx.drawImage(this.mapCache, 0, 0);
-
-        // Draw cities, villages and paths on top
-        this.renderCitiesAndVillages();
-        this.renderPaths();
+        
         this.ctx.restore();
     }
 
