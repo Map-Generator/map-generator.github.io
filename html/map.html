@@ -11,15 +11,35 @@
     
     <button id="toggleMode">Toggle Pixel/Procedural Mode</button>
     <button id="newMap">Generate New Map</button>
+    <button id="toggleMenu">Toggle Terrain Menu</button>
 
-    <canvas id="mapCanvas"></canvas>
+    <div>
+        <label for="mapWidth">Width:</label>
+        <input type="number" id="mapWidth" value="800">
+        <label for="mapHeight">Height:</label>
+        <input type="number" id="mapHeight" value="600">
+        <button id="resizeMap">Resize Map</button>
+    </div>
 
+    <div id="terrainMenu" style="display: none;">
+        <label><input type="checkbox" id="toggleSnow" checked> Snow</label><br>
+        <label><input type="checkbox" id="toggleRocky" checked> Rocky</label><br>
+        <label><input type="checkbox" id="toggleGrassland" checked> Grassland</label><br>
+        <label><input type="checkbox" id="toggleDryPlains" checked> Dry Plains</label><br>
+        <label><input type="checkbox" id="toggleWater" checked> Water</label><br>
+    </div>
 
+    <div style="overflow: auto;">
+        <canvas id="mapCanvas"></canvas>
+    </div>
 
     <!-- Load Libraries -->
     <script src="https://d3js.org/d3-delaunay.v6.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/simplex-noise@2.4.0/simplex-noise.js"></script>
 
     <!-- Load Scripts -->
-    <script src="/js/map.js"></script>
+    <script src="/js/main.js"></script>
+    <script src="/js/terrain.js"></script>
+    <script src="/js/events.js"></script>
 </body>
 </html>
