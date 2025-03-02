@@ -25,6 +25,7 @@ class MapObject {
         // Name generation parts
         this.cityPrefixes = ["Elder", "Storm", "Iron", "High", "Dawn", "Dusk", "Moon", "Sun", "Star", "Dragon", "Crystal", "Silver", "Golden", "Shadow", "Frost"];
         this.citySuffixes = ["haven", "spire", "keep", "guard", "hold", "gate", "fall", "rise", "peak", "crown", "realm", "forge", "heart", "watch", "ward"];
+        this.villagePrefixes = ["Green", "Red", "Blue", "Oak", "Pine", "Maple", "River", "Lake", "Hill", "Stone", "Wood", "Meadow", "Spring", "Summer", "Winter"];
         this.villageSuffixes = ["brook", "wood", "vale", "dale", "field", "stead", "ton", "ford", "cross", "bridge", "mill", "shore", "haven", "rest", "home"];
         
         // Create off-screen canvas for caching
