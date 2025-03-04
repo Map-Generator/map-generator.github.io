@@ -13,7 +13,7 @@ class MapObject {
         this.panX = 0;
         this.panY = 0;
         this.zoomLevel = 1;
-        this.renderMode = 'pixel'; // 'pixel', 'voronoi', or 'smooth'
+        this.renderMode = 'pixel'; // 'pixel' or 'smooth'
         this.terrainTypes = {
             snow: true,
             rocky: true,
@@ -296,9 +296,6 @@ class MapObject {
             case 'pixel':
                 this.renderPixelToCache();
                 break;
-            case 'voronoi':
-                this.renderVoronoiToCache();
-                break;
             case 'smooth':
                 this.renderSmoothToCache();
                 break;
@@ -306,36 +303,6 @@ class MapObject {
         
         // Draw settlements into the cache
         this.renderCitiesAndVillagesToCache();
-    }
-
-    renderVoronoiToCache() {
-        const padding = Math.max(this.width, this.height) * 0.2;
-        const delaunay = d3.Delaunay.from(this.points);
-        const voronoi = delaunay.voronoi([-padding, -padding, this.width + padding, this.height + padding]);
-
-        // Draw base water
-        this.mapCacheCtx.fillStyle = "#1E90FF";
-        this.mapCacheCtx.fillRect(0, 0, this.width, this.height);
-
-        // Draw terrain cells
-        for (let i = 0; i < this.points.length; i++) {
-            const [x, y] = this.points[i];
-            // Only draw if the point could affect the visible area
-            if (x >= -padding && x <= this.width + padding && 
-                y >= -padding && y <= this.height + padding) {
-                if (this.shouldRenderTerrain(this.colors[i])) {
-                    this.mapCacheCtx.beginPath();
-                    voronoi.renderCell(i, this.mapCacheCtx);
-                    this.mapCacheCtx.fillStyle = this.colors[i];
-                    this.mapCacheCtx.fill();
-                } else {
-                    this.mapCacheCtx.beginPath();
-                    voronoi.renderCell(i, this.mapCacheCtx);
-                    this.mapCacheCtx.fillStyle = this.getRandomSelectedColor();
-                    this.mapCacheCtx.fill();
-                }
-            }
-        }
     }
 
     renderPixelToCache() {
@@ -351,130 +318,52 @@ class MapObject {
         this.mapCacheCtx.fillRect(0, 0, this.width, this.height);
 
         // Draw terrain pixels
-        for (let x = -padding; x < this.width + padding; x += gridSize) {
-            for (let y = -padding; y < this.height + padding; y += gridSize) {
-                if (x >= 0 && x < this.width && y >= 0 && y < this.height) {
-                    let closestIndex = delaunay.find(x + gridSize / 2, y + gridSize / 2);
-                    if (this.shouldRenderTerrain(this.colors[closestIndex])) {
-                        this.mapCacheCtx.fillStyle = this.colors[closestIndex];
-                        this.mapCacheCtx.fillRect(x, y, gridSize, gridSize);
-                    } else {
-                        this.mapCacheCtx.fillStyle = this.getRandomSelectedColor();
-                        this.mapCacheCtx.fillRect(x, y, gridSize, gridSize);
-                    }
+        for (let x = 0; x < this.width; x += gridSize) {
+            for (let y = 0; y < this.height; y += gridSize) {
+                const closestIndex = delaunay.find(x + gridSize / 2, y + gridSize / 2);
+                if (this.shouldRenderTerrain(this.colors[closestIndex])) {
+                    this.mapCacheCtx.fillStyle = this.colors[closestIndex];
+                    this.mapCacheCtx.fillRect(x, y, gridSize, gridSize);
+                } else {
+                    this.mapCacheCtx.fillStyle = this.getRandomSelectedColor();
+                    this.mapCacheCtx.fillRect(x, y, gridSize, gridSize);
                 }
             }
         }
     }
 
     renderSmoothToCache() {
-        const ctx = this.mapCacheCtx;
-        const resolution = 8;
-        const padding = this.width * 0.1;
-        const totalWidth = this.width + (padding * 2);
-        const totalHeight = this.height + (padding * 2);
-        const gridSize = totalWidth / resolution;
+        // First render the pixel version
+        this.renderPixelToCache();
         
-        // Create a heightmap using simplex noise
-        const heightMap = new Array(resolution + 2).fill(0)
-            .map(() => new Array(resolution + 2).fill(0));
+        // Enable image smoothing for the smooth effect
+        this.mapCacheCtx.imageSmoothingEnabled = true;
         
-        const seed = Math.random();
-        const simplex = new SimplexNoise(seed);
+        // Create a temporary canvas for the smoothing effect
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = this.width;
+        tempCanvas.height = this.height;
+        const tempCtx = tempCanvas.getContext('2d');
         
-        // Generate smooth height values with padding
-        for (let x = 0; x <= resolution + 1; x++) {
-            for (let y = 0; y <= resolution + 1; y++) {
-                // Convert to normalized coordinates (-0.5 to 0.5)
-                const nx = (x * gridSize - padding) / this.width - 0.5;
-                const ny = (y * gridSize - padding) / this.height - 0.5;
-                const distance = Math.sqrt(nx * nx + ny * ny) / Math.sqrt(0.5);
-                
-                // Stronger edge fade for smoother water transition
-                const edgeFade = Math.max(0, 1 - (distance * 1.2));
-                
-                // Use multiple octaves of noise for more natural terrain
-                let elevation = 0;
-                elevation += (simplex.noise2D(x / 3, y / 3) + 1) / 2 * 0.5;
-                elevation += (simplex.noise2D(x * 1.5, y * 1.5) + 1) / 2 * 0.25;
-                elevation += (simplex.noise2D(x * 3, y * 3) + 1) / 2 * 0.125;
-                
-                // Apply edge fade
-                heightMap[x][y] = elevation * edgeFade;
-            }
-        }
+        // Draw the current pixelated version to the temp canvas
+        tempCtx.drawImage(this.mapCache, 0, 0);
+        
+        // Clear the main cache
+        this.mapCacheCtx.clearRect(0, 0, this.width, this.height);
+        
+        // Draw the smoothed version back to the main cache
+        this.mapCacheCtx.drawImage(tempCanvas, 0, 0);
+        
+        // Disable smoothing again for future pixel operations
+        this.mapCacheCtx.imageSmoothingEnabled = false;
+    }
 
-        // Create gradient for each terrain type except water
-        const terrainGradients = {
-            dryPlains: ctx.createLinearGradient(0, 0, totalWidth, totalHeight),
-            grassland: ctx.createLinearGradient(0, 0, totalWidth, totalHeight),
-            rocky: ctx.createLinearGradient(0, 0, totalWidth, totalHeight),
-            snow: ctx.createLinearGradient(0, 0, totalWidth, totalHeight)
-        };
-
-        // Set up gradient colors (excluding water)
-        terrainGradients.dryPlains.addColorStop(0, '#8B4513');
-        terrainGradients.dryPlains.addColorStop(0.5, '#A0522D');
-        terrainGradients.dryPlains.addColorStop(1, '#8B4513');
-        
-        terrainGradients.grassland.addColorStop(0, '#4CAF50');
-        terrainGradients.grassland.addColorStop(0.5, '#45A049');
-        terrainGradients.grassland.addColorStop(1, '#4CAF50');
-        
-        terrainGradients.rocky.addColorStop(0, '#A9A9A9');
-        terrainGradients.rocky.addColorStop(0.5, '#808080');
-        terrainGradients.rocky.addColorStop(1, '#A9A9A9');
-        
-        terrainGradients.snow.addColorStop(0, '#FFFFFF');
-        terrainGradients.snow.addColorStop(0.5, '#F0F0F0');
-        terrainGradients.snow.addColorStop(1, '#FFFFFF');
-
-        // Clear with water background using the same color as endless water
-        ctx.fillStyle = '#1E90FF';
-        ctx.fillRect(0, 0, this.width, this.height);
-
-        // Draw smooth terrain with padding
-        ctx.save();
-        ctx.translate(-padding, -padding);
-
-        for (let x = 0; x < resolution + 1; x++) {
-            for (let y = 0; y < resolution + 1; y++) {
-                const elevation = heightMap[x][y];
-                
-                ctx.beginPath();
-                ctx.moveTo(x * gridSize, y * gridSize);
-                
-                // Create smooth curves between grid points using bezier curves
-                const nextX = (x + 1) * gridSize;
-                const nextY = (y + 1) * gridSize;
-                const controlX = (x + 0.5) * gridSize;
-                const controlY = (y + 0.5) * gridSize;
-                
-                ctx.bezierCurveTo(
-                    controlX, y * gridSize,
-                    nextX, controlY,
-                    nextX, nextY
-                );
-                
-                // For water, use solid color instead of gradient
-                if (elevation <= 0.25) {
-                    // Skip drawing water to keep the base water color
-                    continue;
-                } else if (elevation > 0.7) {
-                    ctx.fillStyle = this.terrainTypes.snow ? terrainGradients.snow : this.getRandomSelectedGradient(terrainGradients);
-                } else if (elevation > 0.55) {
-                    ctx.fillStyle = this.terrainTypes.rocky ? terrainGradients.rocky : this.getRandomSelectedGradient(terrainGradients);
-                } else if (elevation > 0.35) {
-                    ctx.fillStyle = this.terrainTypes.grassland ? terrainGradients.grassland : this.getRandomSelectedGradient(terrainGradients);
-                } else if (elevation > 0.25) {
-                    ctx.fillStyle = this.terrainTypes.dryPlains ? terrainGradients.dryPlains : this.getRandomSelectedGradient(terrainGradients);
-                }
-                
-                ctx.fill();
-            }
-        }
-        
-        ctx.restore();
+    getColorForElevation(elevation) {
+        if (elevation > 0.7) return this.terrainTypes.snow ? "#FFFFFF" : this.getRandomSelectedColor();
+        if (elevation > 0.55) return this.terrainTypes.rocky ? "#A9A9A9" : this.getRandomSelectedColor();
+        if (elevation > 0.35) return this.terrainTypes.grassland ? "#4CAF50" : this.getRandomSelectedColor();
+        if (elevation > 0.25) return this.terrainTypes.dryPlains ? "#8B4513" : this.getRandomSelectedColor();
+        return "#1E90FF"; // Water
     }
 
     getRandomSelectedGradient(gradients) {
@@ -806,6 +695,12 @@ class MapObject {
 
     setTerrainType(type, enabled) {
         this.terrainTypes[type] = enabled;
+        this.generateMapCache();
+        this.render();
+    }
+
+    cycleRenderMode() {
+        this.renderMode = this.renderMode === 'pixel' ? 'smooth' : 'pixel';
         this.generateMapCache();
         this.render();
     }
